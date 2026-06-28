@@ -10,18 +10,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org/
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - run: npm install
+
+      - run: rm -f package-lock.json
+      - run: npm install --no-package-lock --legacy-peer-deps --no-audit --no-fund
       - run: npm run build
       - run: npx cap add android
       - run: npx cap sync android
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+
       - uses: actions/upload-artifact@v4
         with:
           name: Apex-Tycoon-debug-apk
