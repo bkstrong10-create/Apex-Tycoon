@@ -1,21 +1,15 @@
-# Apex Tycoon v1.1 — Realism + Lap Times
+# Apex Tycoon v1.2 - Broadcast Race Screen
 
-Mobile-first React/Capacitor racing management game.
+Android-ready React + Capacitor source for Apex Tycoon.
 
-## v1.1 additions
-- Live lap timing HUD
-- Qualifying lap times
-- Last lap, best lap, average lap, total time
-- Gap to leader and car ahead
-- Fastest lap bonus
-- Moving track cars and race event feed
-- More realistic garage and race visuals
-- Better upgrade pacing and repair option
+## v1.2 changes
+- Completely redesigned race screen into a TV/broadcast style race view
+- Bigger live track camera with moving cars
+- Live position strip with tire, fuel, and condition meters
+- Pro timing tower with live gaps
+- Pit wall panel with qualifying, risk, fastest lap, and event feed
+- Better result screen and classification table
+- Keeps v1.1.1 balance hotfixes and existing saves
 
 ## Build
-npm install
-npm run build
-npx cap add android
-npx cap sync android
-cd android
-./gradlew assembleDebug
+GitHub Actions builds `Apex-Tycoon-debug-apk` automatically.

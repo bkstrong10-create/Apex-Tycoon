@@ -78,13 +78,13 @@ function driver(seed=0){
   return {id:uid(),name:pick(NAMES),skill,calm,trait:tr,salary:Math.round(420+skill*13+calm*5),age:18+Math.floor(Math.random()*18),xp:0};
 }
 function baseGame(){return {
-  version:"1.1", cash:85000, week:1, rep:0, fans:300, season:1, raceNo:1,
+  version:"1.2", cash:85000, week:1, rep:0, fans:300, season:1, raceNo:1, dnfStreak:0,
   championship:[], history:[{week:1,cash:85000}], sponsor:SPONSORS[0], tab:"home",
   hq:{garage:1,rd:0,marketing:0,staff:0},
   cars:[{id:"starter",model:"hatch",name:"Hatchling #1",condition:100,up:{engine:0,tires:0,aero:0,reliability:0},driverId:"starterDriver",paint:"amber"}],
   drivers:[{...driver(),id:"starterDriver",name:"Jamie Cole",skill:50,calm:54,salary:420,trait:TRAITS[5]}],
   candidates:[driver(),driver(),driver()], selected:"starter",
-  log:["Apex Tycoon v1.1 installed: lap timing, realistic race HUD, fastest lap bonus, and better visuals."],
+  log:["Apex Tycoon v1.2 installed: broadcast race screen, live timing tower, moving cars, and balance fixes."],
   records:{wins:0,podiums:0,poles:0,titles:0,fastestLaps:0},
   lastRace:null,
 };}
@@ -92,11 +92,11 @@ function migrate(old){
   const fresh = baseGame();
   if(!old || typeof old !== "object") return fresh;
   return {
-    ...fresh, ...old, version:"1.1", tab:old.tab || "home",
+    ...fresh, ...old, version:"1.2", tab:old.tab || "home", dnfStreak: old.dnfStreak || 0,
     sponsor: SPONSORS.find(s=>s.name===old?.sponsor?.name) || old.sponsor || SPONSORS[0],
     hq:{...fresh.hq, ...(old.hq||{})},
     records:{...fresh.records, ...(old.records||{})},
-    log:["Apex Tycoon updated to v1.1 Realism + Lap Times.", ...(old.log||[])].slice(0,10),
+    log:["Apex Tycoon updated to v1.2 Broadcast Race Screen: better live race view, lap timing, and balance fixes.", ...(old.log||[])].slice(0,10),
   };
 }
 function saveGame(g){ localStorage.setItem(SAVE_KEY, JSON.stringify(g)); }
@@ -171,7 +171,7 @@ export default function App(){
  const addLog=(m)=>setG(x=>({...x,log:[m,...x.log].slice(0,10)}));
  function simRace(){
   if(!selected||!selectedDriver){addLog("Assign a driver before racing.");return}
-  if(g.cash<series.entry){addLog("Not enough cash for entry fee.");return}
+  const emergencyAdvance = g.cash < series.entry ? Math.max(0, Math.round(series.entry + (selectedDriver?.salary||0) + 1200 - g.cash)) : 0;
   const weather=pick(WEATHER), track=pick(TRACKS);
   const laps = Math.round(series.laps[0] + Math.random()*(series.laps[1]-series.laps[0]));
   const st=carStats(selected); const wet=weather.name.includes("Rain"); const trait=selectedDriver.trait || TRAITS[5];
@@ -181,7 +181,9 @@ export default function App(){
   const grid=[{id:"player",name:`${selected.name} / ${selectedDriver.name}`,player:true,qLap:qPlayerLap},...opponents.map(o=>({...o,qLap:clamp(track.base + weather.lap - (o.power+o.driver.skill*.12)*.24 + Math.random()*1.6,42,180)}))].sort((a,b)=>a.qLap-b.qLap);
   const pole=grid[0].player; const startPos=grid.findIndex(f=>f.player)+1;
   let playerPower=st.speed*.34+st.grip*.33*weather.grip+selectedDriver.skill*.21+selectedDriver.calm*.12+(trait.speed||0)+(trait.grip||0)+(wet&&trait.wet?12:0)+(Math.random()*15-7.5);
-  const risk=clamp(.055+weather.drama+(trait.risk||0)+(100-st.reliability)*.0054,0,.42);
+  const rawRisk = .012 + weather.drama*.22 + (trait.risk||0)*.45 + (100-st.reliability)*.0015 + (100-selected.condition)*.0007 - (selected.up.reliability||0)*.012 - g.hq.staff*.006;
+  const mercy = (g.dnfStreak||0)>=2 ? .12 : (g.dnfStreak||0)===1 ? .45 : 1;
+  const risk=clamp(rawRisk*mercy,.005, selected.condition<25 ? .18 : .09);
   const dnf=Math.random()<risk; const dnfLap=dnf?Math.max(3, Math.min(laps-1, Math.round(laps*(.25+Math.random()*.65)))):null;
   const playerLaps=makeLapSet({track,weather,stats:st,driver:selectedDriver,power:playerPower,laps,dnf,dnfLap,player:true});
   const playerSum=lapSummary(playerLaps);
@@ -206,13 +208,14 @@ export default function App(){
   events.push(`Qualifying: ${selectedDriver.name} starts P${startPos} with a ${fmt(qPlayerLap)} lap.`);
   if(pole)events.push("TV cameras caught your car taking pole in qualifying.");
   if(weather.name.includes("Rain"))events.push(`${weather.icon} ${weather.name} made lap times swing by several seconds.`);
+  if(emergencyAdvance>0)events.push(`Emergency sponsor advance approved: ${money(emergencyAdvance)} so the team can make the grid.`);
   if(Math.random()<weather.drama)events.push("A safety car compressed the field and reset the gaps midway through the race.");
   if(fastest.player)events.push(`Fastest lap: ${fmt(fastest.best)} from ${selectedDriver.name}.`);
   if(dnf)events.push(`Mechanical failure on lap ${dnfLap} ended the race early.`);
   else if(rank===0)events.push("Your pit wall nailed the strategy and controlled the final stint.");
   else if(rank<3)events.push("A clean podium finish impressed the paddock.");
   else events.push("The team brought the car home and collected useful race data.");
-  setAnim(0); setRace({phase:"live",weather,track,laps,grid,field,rank,dnf,pole,events,fastest,player:playerEntry,leaderGap:playerEntry.total-leaderTotal,aheadGap:playerEntry.total-aheadTotal});
+  setAnim(0); setRace({phase:"live",weather,track,laps,grid,field,rank,dnf,pole,events,fastest,player:playerEntry,leaderGap:playerEntry.total-leaderTotal,aheadGap:playerEntry.total-aheadTotal,emergencyAdvance,risk});
  }
  function collect(){
   if(!race)return; const rank=race.rank; const prize=race.dnf?0:(series.prize[rank]||500); const sponsor=g.sponsor; let sponsorBonus=sponsor.pay;
@@ -222,11 +225,12 @@ export default function App(){
   const pointsTable=[25,18,15,12,10,8,6,4,2,1]; const points=race.dnf?0:(pointsTable[rank]||0)+(race.fastest?.player?1:0);
   const repGain=race.dnf?-4:Math.max(2,Math.round((series.prize.length-rank+2)*2.2))+(goalMet?sponsor.rep:0)+(race.fastest?.player?2:0);
   const fanGain=race.dnf?-Math.round(series.fans*.08):Math.round(series.fans*(1-rank*.075)*(1+g.hq.marketing*.12)*(selectedDriver.trait?.fans?1.18:1));
-  const salary=g.drivers.reduce((s,d)=>s+d.salary,0); const loss=race.dnf?Math.round(18+Math.random()*18):Math.round(7+Math.random()*11+race.weather.drama*12);
-  const newCash=g.cash+prize+sponsorBonus+fastestLapBonus-series.entry-salary; const newWeek=g.week+1; const nextRace=race.raceNo>=series.races?1:g.raceNo+1; const newSeason=race.raceNo>=series.races?g.season+1:g.season;
+  const salary=g.drivers.reduce((s,d)=>s+d.salary,0); const loss=race.dnf?Math.round(12+Math.random()*13):Math.round(7+Math.random()*11+race.weather.drama*12);
+  const dnfInsurance = race.dnf ? Math.round(series.entry*.75 + salary*.5) : 0;
+  const newCash=g.cash+(race.emergencyAdvance||0)+prize+sponsorBonus+fastestLapBonus+dnfInsurance-series.entry-salary; const newWeek=g.week+1; const nextRace=race.raceNo>=series.races?1:g.raceNo+1; const newSeason=race.raceNo>=series.races?g.season+1:g.season;
   const titleWon = race.raceNo>=series.races && rank < 3;
-  const logs=[`P${rank+1} at ${race.track.name}. Best ${fmt(race.player.best)}, total ${fmt(race.player.total)}.`, goalMet?`${sponsor.name} goal met: ${sponsor.goal}.`:`${sponsor.name} goal missed.`, fastestLapBonus?`Fastest lap bonus earned: ${money(fastestLapBonus)}.`:null, titleWon?`Season ${g.season} ended with a championship-level result.`:null].filter(Boolean);
-  setG(x=>({...x,cash:newCash,week:newWeek,season:newSeason,raceNo:nextRace,rep:clamp(x.rep+repGain,0,9999),fans:clamp(x.fans+fanGain,0,99999999),lastRace:race,history:[...x.history,{week:newWeek,cash:newCash}].slice(-30),championship:[...x.championship,{season:x.season,race:x.raceNo,track:race.track.name,position:rank+1,points,bestLap:race.player.best,totalTime:race.player.total}],records:{...x.records,wins:x.records.wins+(rank===0?1:0),podiums:x.records.podiums+(rank<3?1:0),poles:x.records.poles+(race.pole?1:0),titles:x.records.titles+(titleWon?1:0),fastestLaps:(x.records.fastestLaps||0)+(race.fastest?.player?1:0)},cars:x.cars.map(c=>c.id===selected.id?{...c,condition:clamp(c.condition-loss,5,100)}:c),drivers:x.drivers.map(d=>d.id===selectedDriver.id?{...d,xp:(d.xp||0)+points,skill:clamp(d.skill+(points>12?1:0),1,99)}:d),log:[...logs,...race.events,...x.log].slice(0,10)})); setRace(null);
+  const logs=[`P${rank+1} at ${race.track.name}. Best ${fmt(race.player.best)}, total ${fmt(race.player.total)}.`, goalMet?`${sponsor.name} goal met: ${sponsor.goal}.`:`${sponsor.name} goal missed.`, fastestLapBonus?`Fastest lap bonus earned: ${money(fastestLapBonus)}.`:null, dnfInsurance?`DNF insurance recovery paid ${money(dnfInsurance)} to keep the team alive.`:null, titleWon?`Season ${g.season} ended with a championship-level result.`:null].filter(Boolean);
+  setG(x=>({...x,cash:newCash,week:newWeek,season:newSeason,raceNo:nextRace,dnfStreak:race.dnf?(x.dnfStreak||0)+1:0,rep:clamp(x.rep+repGain,0,9999),fans:clamp(x.fans+fanGain,0,99999999),lastRace:race,history:[...x.history,{week:newWeek,cash:newCash}].slice(-30),championship:[...x.championship,{season:x.season,race:x.raceNo,track:race.track.name,position:rank+1,points,bestLap:race.player.best,totalTime:race.player.total}],records:{...x.records,wins:x.records.wins+(rank===0?1:0),podiums:x.records.podiums+(rank<3?1:0),poles:x.records.poles+(race.pole?1:0),titles:x.records.titles+(titleWon?1:0),fastestLaps:(x.records.fastestLaps||0)+(race.fastest?.player?1:0)},cars:x.cars.map(c=>c.id===selected.id?{...c,condition:clamp(c.condition-loss,5,100)}:c),drivers:x.drivers.map(d=>d.id===selectedDriver.id?{...d,xp:(d.xp||0)+points,skill:clamp(d.skill+(points>12?1:0),1,99)}:d),log:[...logs,...race.events,...x.log].slice(0,10)})); setRace(null);
  }
  function upgrade(car,type){ const cost=upgradeCost(g, car, type); if(cost===null)return; if(g.cash<cost){addLog("Not enough cash for that upgrade.");return} setG(x=>({...x,cash:x.cash-cost,cars:x.cars.map(c=>c.id===car.id?{...c,up:{...c.up,[type]:c.up[type]+1}}:c),log:[`Installed ${type} level ${car.up[type]+1} on ${car.name} for ${money(cost)}.`,...x.log].slice(0,10)})); }
  function repair(car){ const cost=repairCost(g, car); if(cost<=0)return; if(g.cash<cost){addLog("Not enough cash for repairs.");return} setG(x=>({...x,cash:x.cash-cost,cars:x.cars.map(c=>c.id===car.id?{...c,condition:100}:c),log:[`${car.name} repaired for ${money(cost)}.`,...x.log].slice(0,10)})); }
@@ -241,4 +245,111 @@ function Drivers({g,setG,hire}){return <div className="stack"><Card><div classNa
 function RaceSetup({g,setG,selected,driver,series,simRace}){const stats=carStats(selected); return <div className="stack"><CarRender type={stats.model.render} paint={selected.paint}/><Card className="raceCard"><div className="cardTitle"><Radio size={15}/> Race Weekend</div><h2>{series.name}</h2><p>Selected: <b>{selected.name}</b> with <b>{driver?driver.name:"No Driver"}</b></p><select value={g.selected} onChange={e=>setG({...g,selected:e.target.value})}>{g.cars.map(c=><option key={c.id} value={c.id}>{c.name} {c.driverId?"":"— no driver"}</option>)}</select><div className="grid2 featureGrid"><div><CloudRain/> Weather changes lap pace</div><div><Timer/> Qualifying lap times</div><div><Clock3/> Live timing tower</div><div><Handshake/> Sponsor goals</div></div><button className="primary giant" onClick={simRace}><Flag/> Start Race Weekend</button></Card><Card><div className="cardTitle"><Handshake size={15}/> Sponsor</div><h2>{g.sponsor.name}</h2><p>{money(g.sponsor.pay)}/week • Bonus {money(g.sponsor.bonus)} • Goal: {g.sponsor.goal}</p>{SPONSORS.filter(s=>g.rep>=s.req).map(s=><button className="row" key={s.name} onClick={()=>setG({...g,sponsor:s})}><span>{s.name}<small>{s.goal}</small></span><b>{money(s.pay)}/wk</b></button>)}</Card></div>}
 function HQ({g,setG}){const defs={garage:["Garage Bays",60000],rd:["R&D Lab",75000],marketing:["Marketing Office",65000],staff:["Scouting Dept",70000]};return <div className="stack"><CarRender type="prototype"/><Card><div className="cardTitle"><Building2 size={15}/> Headquarters</div>{Object.entries(defs).map(([k,[name,cost]])=><button className="row" key={k} onClick={()=>{let real=Math.round(cost*(g.hq[k]+1)); if(g.cash>=real)setG({...g,cash:g.cash-real,hq:{...g.hq,[k]:g.hq[k]+1},log:[`${name} upgraded to level ${g.hq[k]+2}.`,...g.log].slice(0,10)})}}><span>{name}<small>Level {g.hq[k]+1}</small></span><b>{money(cost*(g.hq[k]+1))}</b></button>)}</Card></div>}
 function Stats({g}){const races=g.championship.filter(r=>r.season===g.season); const pts=races.reduce((s,r)=>s+r.points,0); const best=[...g.championship].sort((a,b)=>a.bestLap-b.bestLap)[0];return <div className="stack"><Card><div className="cardTitle"><Crown size={15}/> Records</div><div className="records"><div><b>{g.records.wins}</b><small>Wins</small></div><div><b>{g.records.podiums}</b><small>Podiums</small></div><div><b>{g.records.poles}</b><small>Poles</small></div><div><b>{g.records.fastestLaps||0}</b><small>Fastest Laps</small></div></div></Card><Card><div className="cardTitle"><Timer size={15}/> Lap Records</div>{best?<><h2>{fmt(best.bestLap)}</h2><p>Best team lap at {best.track}, Season {best.season} Race {best.race}.</p></>:<p>No lap records yet. Run a race weekend.</p>}</Card><Card><div className="cardTitle"><Medal size={15}/> Season {g.season}</div><h2>{pts} points</h2>{races.map(r=><p className="news" key={`${r.season}-${r.race}-${r.track}`}>Race {r.race}: P{r.position} at {r.track} • Best {fmt(r.bestLap)} • {r.points} pts</p>)}</Card></div>}
-function RaceView({race,anim,collect,skip}){const lap=Math.min(race.laps, Math.max(1, Math.ceil((anim/100)*race.laps))); const player=race.player; const liveLast=player.laps[Math.min(lap-1, player.laps.length-1)] || player.last; const liveBest=Math.min(...player.laps.slice(0, Math.min(lap, player.laps.length))); const liveAvg=player.laps.slice(0, Math.min(lap, player.laps.length)).reduce((s,v)=>s+v,0)/Math.min(lap, player.laps.length); const playerPos = race.field.findIndex(f=>f.player)+1;return <div className="stack"><Card className="raceLive"><div className="cardTitle"><Flag size={15}/> {race.track.name} • {race.weather.icon} {race.weather.name}</div>{race.phase==="live"?<><div className="raceHud"><Metric icon={RotateCw} label="Lap" value={`${lap}/${race.laps}`}/><Metric icon={Clock3} label="Last" value={fmt(liveLast)}/><Metric icon={Timer} label="Best" value={fmt(liveBest)}/><Metric icon={GaugeCircle} label="Avg" value={fmt(liveAvg)}/></div><div className="track"><div className={`trackOval ${race.weather.name.includes("Rain")?"wet":""}`}><span className="carDot player" style={{offsetDistance:`${anim}%`}}/><span className="carDot rival r1" style={{offsetDistance:`${Math.max(0,anim-6)}%`}}/><span className="carDot rival r2" style={{offsetDistance:`${Math.max(0,anim-13)}%`}}/><span className="carDot rival r3" style={{offsetDistance:`${Math.max(0,anim-20)}%`}}/></div></div><div className="tower"><p><b>Start</b> P{player.startPos} • Quali {fmt(player.qLap)}</p><p><b>Live</b> P{playerPos} • Gap {gap(Math.max(0, race.leaderGap*(anim/100)))} • Ahead {gap(Math.max(0, race.aheadGap*(anim/100)))}</p></div><div className="leaderboard">{race.field.slice(0,6).map((f,i)=><p className={f.player?"me":""} key={f.id}><b>P{i+1}</b><span>{f.name}</span><small>{f.dnf?`DNF L${f.dnfLap}`:gap(f.total-race.field[0].total)}</small></p>)}</div><button onClick={skip}><FastForward size={14}/> Skip to Results</button></>:<><div className="resultBadge">{race.dnf?"DNF":`P${race.rank+1}`}</div><div className="raceHud"><Metric icon={Timer} label="Best" value={fmt(player.best)}/><Metric icon={Clock3} label="Total" value={fmt(player.total)}/><Metric icon={GaugeCircle} label="Leader Gap" value={gap(race.leaderGap)}/><Metric icon={TrendingUp} label="Fastest" value={race.fastest?.player?"YES":"NO"}/></div><div className="leaderboard results">{race.field.map((f,i)=><p className={f.player?"me":""} key={f.id}><b>P{i+1}</b><span>{f.name} {f.dnf?`DNF L${f.dnfLap}`:""}</span><small>{f.dnf?"Out":fmt(f.total)}</small></p>)}</div>{race.events.map(e=><p className="news hot" key={e}>{e}</p>)}<button className="primary giant" onClick={collect}><Coins size={16}/> Collect Results</button></>}</Card></div>}
+function RaceView({race,anim,collect,skip}){
+  const lap=Math.min(race.laps, Math.max(1, Math.ceil((anim/100)*race.laps)));
+  const player=race.player;
+  const lapProgressRaw=(anim/100)*race.laps;
+  const lapPct=anim>=100?1:(lapProgressRaw-Math.floor(lapProgressRaw));
+  const sum=(arr,n)=>arr.slice(0, Math.max(1, Math.min(n, arr.length))).reduce((s,v)=>s+(Number.isFinite(v)?v:0),0);
+  const liveField=[...race.field].map(f=>{
+    const upto=Math.max(1, Math.min(lap, f.laps?.length||1));
+    const out=f.dnf && lap >= (f.dnfLap||999);
+    return {...f, liveElapsed:sum(f.laps||[f.total||0],upto), liveOut:out, liveLast:(f.laps||[])[upto-1]||f.last||f.best||0};
+  }).sort((a,b)=>{
+    if(a.liveOut&&!b.liveOut)return 1;
+    if(!a.liveOut&&b.liveOut)return -1;
+    if(a.liveOut&&b.liveOut)return (b.dnfLap||0)-(a.dnfLap||0);
+    return a.liveElapsed-b.liveElapsed;
+  });
+  const playerLive=liveField.find(f=>f.player)||player;
+  const playerPos=liveField.findIndex(f=>f.player)+1;
+  const leader=liveField[0]||playerLive;
+  const ahead=playerPos>1?liveField[playerPos-2]:null;
+  const liveLeaderGap=playerLive.liveOut?race.leaderGap:Math.max(0,(playerLive.liveElapsed||0)-(leader.liveElapsed||0));
+  const liveAheadGap=ahead?Math.max(0,(playerLive.liveElapsed||0)-(ahead.liveElapsed||0)):0;
+  const liveLast=playerLive.liveLast||player.last;
+  const currentLaps=(player.laps||[]).slice(0, Math.min(lap, player.laps.length));
+  const liveBest=Math.min(...currentLaps);
+  const liveAvg=currentLaps.reduce((s,v)=>s+v,0)/Math.max(1,currentLaps.length);
+  const tireWear=clamp(100-(lap/race.laps)*(20+race.weather.drama*80)-(race.weather.name==='Hot Track'?10:0),25,100);
+  const fuel=clamp(100-(lap/race.laps)*94,0,100);
+  const condition=clamp(100-(lap/race.laps)*(race.dnf?65:18+race.weather.drama*30),race.dnf&&lap>=(race.dnfLap||999)?8:35,100);
+  const eventCount=Math.max(1,Math.min(race.events.length,Math.ceil(anim/24)));
+  const visibleEvents=race.events.slice(0,eventCount);
+  const sector=Math.min(3,Math.max(1,Math.ceil((lapPct||.01)*3)));
+  const baseOffset=((lap-1+lapPct)/race.laps*100);
+  const dotOffset=(f,i)=>`${((baseOffset - i*6.2 - Math.min(16,Math.max(0,(f.liveElapsed||0)-(leader.liveElapsed||0))*.22) + 100)%100).toFixed(2)}%`;
+  const phaseLabel=race.phase==='live' ? (playerLive.liveOut?'CAR OUT':`SECTOR ${sector}`) : 'CLASSIFIED';
+  return <div className="stack raceBroadcastStack"><Card className="broadcastRace">
+    <div className="broadcastTop">
+      <div><span className="liveBadge">{race.phase==='live'?'LIVE':'RESULT'}</span><h2>{race.track.name}</h2><p>{race.weather.icon} {race.weather.name} • {race.track.type.toUpperCase()} • {race.laps} laps</p></div>
+      <div className="raceClock"><small>{phaseLabel}</small><b>{race.phase==='live'?`L${lap}`:`${race.laps}`}</b></div>
+    </div>
+    {race.phase==='live'?<>
+      <div className={`tvStage ${race.weather.name.includes('Rain')?'wet':''} ${race.weather.name==='Hot Track'?'hot':''}`}>
+        <div className="broadcastOverlay"><span>APEX TV</span><span>{phaseLabel}</span></div>
+        <div className="circuitSurface">
+          <div className="circuitGlow"/>
+          <div className="racingLine"/>
+          <div className="startStripe"/>
+          {liveField.slice(0,7).map((f,i)=><span key={f.id} className={`circuitCar ${f.player?'player':'rival'} r${i} ${f.liveOut?'out':''}`} style={{offsetDistance:dotOffset(f,i)}} title={f.name}><em/></span>)}
+        </div>
+        <div className="cameraVignette"/>
+      </div>
+      <div className="positionStrip">
+        <div className="positionBox"><small>Running</small><b>P{playerPos}</b><span>{playerLive.liveOut?`DNF Lap ${playerLive.dnfLap}`:player.name}</span></div>
+        <div className="miniMeter"><span>Tires</span><i><em style={{width:`${tireWear}%`}}/></i><b>{Math.round(tireWear)}%</b></div>
+        <div className="miniMeter"><span>Fuel</span><i><em style={{width:`${fuel}%`}}/></i><b>{Math.round(fuel)}%</b></div>
+        <div className="miniMeter"><span>Car</span><i><em style={{width:`${condition}%`}}/></i><b>{Math.round(condition)}%</b></div>
+      </div>
+      <div className="raceTimingDeck">
+        <Metric icon={RotateCw} label="Lap" value={`${lap}/${race.laps}`}/>
+        <Metric icon={Clock3} label="Last Lap" value={fmt(liveLast)}/>
+        <Metric icon={Timer} label="Best Lap" value={fmt(liveBest)}/>
+        <Metric icon={GaugeCircle} label="Avg Lap" value={fmt(liveAvg)}/>
+        <Metric icon={Target} label="Gap Lead" value={gap(liveLeaderGap)}/>
+        <Metric icon={Activity} label="Gap Ahead" value={gap(liveAheadGap)}/>
+      </div>
+      <div className="raceGrid">
+        <div className="timingTowerPro">
+          <div className="towerHead"><span>POS</span><span>DRIVER / TEAM</span><span>GAP</span></div>
+          {liveField.slice(0,8).map((f,i)=><div className={f.player?'me':''} key={f.id}><b>P{i+1}</b><span>{f.name}</span><small>{f.liveOut?`OUT L${f.dnfLap}`:gap(Math.max(0,(f.liveElapsed||0)-(leader.liveElapsed||0)))}</small></div>)}
+        </div>
+        <div className="pitWall">
+          <div className="cardTitle"><Radio size={15}/> Pit Wall</div>
+          <p><b>Qualifying:</b> P{player.startPos} • {fmt(player.qLap)}</p>
+          <p><b>Risk:</b> {(race.risk*100).toFixed(1)}% mechanical</p>
+          <p><b>Fastest:</b> {race.fastest?.player?'Your car':race.fastest?.name}</p>
+          <div className="eventFeed">{visibleEvents.map((e,i)=><p key={`${e}-${i}`} className={i===visibleEvents.length-1?'hot':''}>{e}</p>)}</div>
+        </div>
+      </div>
+      <div className="raceFooterActions"><button onClick={skip}><FastForward size={14}/> Skip to Results</button></div>
+    </>:<>
+      <div className={`resultHero ${race.dnf?'bad':'good'}`}>
+        <div className="podiumGlow"/>
+        <small>{race.dnf?'Mechanical DNF':'Race Classified'}</small>
+        <b>{race.dnf?'DNF':`P${race.rank+1}`}</b>
+        <span>{race.dnf?`Out on lap ${race.player.dnfLap}`:`${player.name} finished ${gap(race.leaderGap)} from the winner`}</span>
+      </div>
+      <div className="raceTimingDeck resultStats">
+        <Metric icon={Medal} label="Result" value={race.dnf?'DNF':`P${race.rank+1}`}/>
+        <Metric icon={Timer} label="Best Lap" value={fmt(player.best)}/>
+        <Metric icon={Clock3} label="Total Time" value={fmt(player.total)}/>
+        <Metric icon={GaugeCircle} label="Leader Gap" value={gap(race.leaderGap)}/>
+        <Metric icon={TrendingUp} label="Fastest Lap" value={race.fastest?.player?'YES':'NO'}/>
+        <Metric icon={Flag} label="Started" value={`P${player.startPos}`}/>
+      </div>
+      <div className="raceGrid">
+        <div className="timingTowerPro resultsTower">
+          <div className="towerHead"><span>POS</span><span>CLASSIFICATION</span><span>TIME</span></div>
+          {race.field.map((f,i)=><div className={f.player?'me':''} key={f.id}><b>P{i+1}</b><span>{f.name} {f.dnf?`DNF L${f.dnfLap}`:''}</span><small>{f.dnf?'OUT':fmt(f.total)}</small></div>)}
+        </div>
+        <div className="pitWall resultNotes">
+          <div className="cardTitle"><Newspaper size={15}/> Race Control</div>
+          {race.events.map((e,i)=><p className={i===0?'hot':''} key={`${e}-${i}`}>{e}</p>)}
+        </div>
+      </div>
+      <button className="primary giant" onClick={collect}><Coins size={16}/> Collect Results</button>
+    </>}
+  </Card></div>
+}
