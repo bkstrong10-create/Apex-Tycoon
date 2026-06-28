@@ -1,18 +1,21 @@
-# Apex Tycoon v1
+# Apex Tycoon v1.1 — Realism + Lap Times
 
-Realistic mobile racing management game source.
+Mobile-first React/Capacitor racing management game.
 
-## Build locally
-```bash
+## v1.1 additions
+- Live lap timing HUD
+- Qualifying lap times
+- Last lap, best lap, average lap, total time
+- Gap to leader and car ahead
+- Fastest lap bonus
+- Moving track cars and race event feed
+- More realistic garage and race visuals
+- Better upgrade pacing and repair option
+
+## Build
 npm install
 npm run build
 npx cap add android
 npx cap sync android
 cd android
 ./gradlew assembleDebug
-```
-
-APK: `android/app/build/outputs/apk/debug/app-debug.apk`
-
-## GitHub Actions
-Push this folder to the `Apex-Tycoon` repo. The workflow builds the APK automatically.
